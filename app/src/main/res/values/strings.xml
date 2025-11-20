@@ -1,0 +1,69 @@
+<resources>
+    <string name="app_name">UsageMonitor</string>
+    <string name="appusagemanager_app_name">AppUsageManager</string>
+    <string name="appusagemanager_phone">No Phone</string>
+
+    <!-- Common -->
+    <string name="edit">Edit</string>
+    <string name="delete">Delete</string>
+    <string name="save">Save</string>
+    <string name="create">Create</string>
+    <string name="add">Add</string>
+
+    <!-- App related -->
+    <string name="app_icon">App Icon</string>
+    <string name="edit_app">Edit App Settings</string>
+    <string name="category">Category</string>
+    <string name="max_usage_seconds">Max Usage (seconds)</string>
+    <string name="max_usage_per_day">Max Usage Per Day</string>
+    <string name="select_group">Select Group</string>
+    <string name="ignored">Ignored</string>
+    <string name="floating_timer">Floating Timer</string>
+    <string name="strict_mode">Strict Mode</string>
+    <string name="package_name">Package Name</string>
+
+    <!-- Group related -->
+    <string name="group_icon">Group Icon</string>
+    <string name="create_edit_group">Create/Edit Group</string>
+    <string name="group_name">Group Name</string>
+    <string name="select_icon">Select Icon</string>
+    <string name="no_group">No Group</string>
+
+    <!-- Challenge related -->
+    <string name="create_challenge">Create Challenge</string>
+    <string name="challenge_type">Challenge Type</string>
+    <string name="app_challenge">App Challenge</string>
+    <string name="group_challenge">Group Challenge</string>
+    <string name="device_fast_challenge">Device Fast</string>
+    <string name="select_app">Select App</string>
+    <string name="select_group_challenge">Select Group</string>
+    <string name="challenge_behavior">Challenge Behavior</string>
+    <string name="limit_challenge">Limit Usage</string>
+    <string name="fast_challenge">Fast (No Usage)</string>
+    <string name="challenge_value_seconds">Value (seconds)</string>
+    <string name="block_until_timestamp">Block Until (timestamp)</string>
+    <string name="challenge_active">Active</string>
+    <string name="challenge_failed">Failed</string>
+    <string name="challenge_complete">Complete</string>
+
+    <!-- Device settings -->
+    <string name="max_device_usage">Max Device Usage (seconds)</string>
+    <string name="reset">Reset</string>
+
+    <!-- Notification -->
+    <string name="notification_title">Usage Monitor Active</string>
+    <string name="notification_content">Tracking your app usage</string>
+    <string name="notification_stop">Stop Monitoring</string>
+
+    <!-- Dashboard -->
+    <string name="dashboard">Dashboard</string>
+    <string name="total_screen_time_today">Total Screen Time Today</string>
+    <string name="select_date">Select Date</string>
+    <string name="today">Today</string>
+    <string name="usage_by_group">Usage by Group</string>
+    <string name="usage_by_app">Usage by App</string>
+    <string name="sessions">sessions</string>
+    <string name="no_usage_data">No usage data available</string>
+    <string name="unlocks">Unlocks</string>
+    <string name="notifications">Notifications</string>
+</resources>

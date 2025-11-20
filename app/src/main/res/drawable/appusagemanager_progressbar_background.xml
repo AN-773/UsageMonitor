@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:id="@android:id/background">
+        <shape>
+            <corners android:radius="3dp" />
+            <solid android:color="@color/appusagemanager_progress_background" />
+        </shape>
+    </item>
+    <item android:id="@android:id/progress">
+        <clip>
+            <shape>
+                <corners android:radius="3dp" />
+                <gradient
+                    android:angle="0"
+                    android:endColor="@color/appusagemanager_grad_2"
+                    android:startColor="@color/appusagemanager_grad_1" />
+            </shape>
+        </clip>
+    </item>
+</layer-list>

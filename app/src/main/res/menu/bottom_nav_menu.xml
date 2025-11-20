@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/nav_dashboard"
+        android:icon="@android:drawable/ic_menu_view"
+        android:title="Dashboard" />
+
+    <item
+        android:id="@+id/nav_apps"
+        android:icon="@android:drawable/ic_menu_agenda"
+        android:title="Apps" />
+
+    <item
+        android:id="@+id/nav_groups"
+        android:icon="@android:drawable/ic_menu_sort_by_size"
+        android:title="Groups" />
+
+<!--    <item-->
+<!--        android:id="@+id/nav_challenges"-->
+<!--        android:icon="@android:drawable/ic_menu_compass"-->
+<!--        android:title="Challenges" />-->
+</menu>
+

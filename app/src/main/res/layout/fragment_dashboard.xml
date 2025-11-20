@@ -1,0 +1,152 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.core.widget.NestedScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <!-- Usage Overview with Pie Chart - Paper Style -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="20dp"
+            android:orientation="vertical"
+            android:paddingHorizontal="16dp"
+            android:paddingBottom="16dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="20dp"
+                android:text="@string/total_screen_time_today"
+                android:textSize="18sp"
+
+                android:textStyle="bold" />
+
+            <!-- Pie Chart Container with Center Text Overlay -->
+            <FrameLayout
+                android:layout_width="match_parent"
+                android:layout_height="350dp"
+                android:layout_gravity="center">
+
+                <com.github.mikephil.charting.charts.PieChart
+                    android:id="@+id/usage_pie_chart"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent" />
+
+                <!-- Total Time Display (overlaid in center) -->
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:gravity="center"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/total_screen_time"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textSize="28sp"
+                        android:textStyle="bold"
+                        tools:text="1 hr 52 min" />
+
+                    <TextView
+                        android:id="@+id/screen_sessions_count"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12sp"
+                        tools:text="Today" />
+
+                </LinearLayout>
+
+            </FrameLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:paddingTop="16dp"
+                android:paddingBottom="4dp">
+
+                <!-- Unlocks Section -->
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:gravity="center"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/unlocks_count"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textSize="24sp"
+                        android:textStyle="bold"
+                        tools:text="42" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/unlocks"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="14sp" />
+                </LinearLayout>
+
+                <!-- Notifications Section -->
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:gravity="center"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/notifications_count"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textSize="24sp"
+                        android:textStyle="bold"
+                        tools:text="128" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/notifications"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="14sp" />
+                </LinearLayout>
+            </LinearLayout>
+
+        </LinearLayout>
+
+        <!-- Tab Layout for switching between Groups and Apps - Paper Style -->
+        <com.google.android.material.tabs.TabLayout
+            android:id="@+id/usage_tabs"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            app:tabGravity="fill"
+            app:tabIndicatorColor="?android:attr/textColorPrimary"
+            app:tabMode="fixed"
+            app:tabSelectedTextColor="?android:attr/textColorPrimary"
+            app:tabTextColor="?android:attr/textColorSecondary" />
+
+        <!-- ViewPager2 for Groups and Apps -->
+        <androidx.viewpager2.widget.ViewPager2
+            android:id="@+id/usage_viewpager"
+            android:layout_width="match_parent"
+            android:paddingHorizontal="16dp"
+            android:layout_height="600dp" />
+
+    </LinearLayout>
+
+</androidx.core.widget.NestedScrollView>
+
