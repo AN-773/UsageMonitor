@@ -4,7 +4,9 @@ import android.app.*
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import androidx.core.app.NotificationCompat
 import sau.odev.usagemonitor.MainActivity
 import sau.odev.usagemonitor.R
@@ -12,9 +14,18 @@ import sau.odev.usagemonitor.appusagemanager.AppsUsageManager
 
 class UsageMonitorService : Service() {
 
+    private val handler = Handler(Looper.getMainLooper())
+    private val syncRunnable = object : Runnable {
+        override fun run() {
+            syncUsageData()
+            handler.postDelayed(this, SYNC_INTERVAL_MS)
+        }
+    }
+
     companion object {
         private const val CHANNEL_ID = "usage_monitor_channel"
         private const val NOTIFICATION_ID = 1001
+        private const val SYNC_INTERVAL_MS = 5 * 60 * 1000L // 5 minutes
         const val ACTION_START = "sau.odev.usagemonitor.START_MONITORING"
         const val ACTION_STOP = "sau.odev.usagemonitor.STOP_MONITORING"
 
@@ -120,6 +131,8 @@ class UsageMonitorService : Service() {
     private fun startMonitoring() {
         try {
             AppsUsageManager.getInstance().startObserving()
+            // Start periodic sync
+            handler.post(syncRunnable)
             updateNotification(
                 "Monitoring Active",
                 "Tracking app usage in background"
@@ -135,11 +148,22 @@ class UsageMonitorService : Service() {
 
     private fun stopMonitoring() {
         try {
-            // Stop observing if there's a stop method
+            // Stop periodic sync
+            handler.removeCallbacks(syncRunnable)
             updateNotification(
                 "Monitoring Stopped",
                 "Usage monitoring has been stopped"
             )
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    private fun syncUsageData() {
+        try {
+            val usageStatsSync = AppsUsageManager.getInstance().getUsageStatsSync()
+            // Sync today's usage data from UsageStatsManager
+//            usageStatsSync.syncTodayUsage()
         } catch (e: Exception) {
             e.printStackTrace()
         }

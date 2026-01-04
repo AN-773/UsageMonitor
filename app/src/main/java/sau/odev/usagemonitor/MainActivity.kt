@@ -1,7 +1,14 @@
 package sau.odev.usagemonitor
 
 import android.app.AlertDialog
+import android.content.ActivityNotFoundException
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
+import android.provider.Settings
 import android.view.View
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
@@ -24,6 +31,7 @@ import sau.odev.usagemonitor.fragments.AppsFragment
 import sau.odev.usagemonitor.fragments.ChallengesFragment
 import sau.odev.usagemonitor.fragments.DashboardFragment
 import sau.odev.usagemonitor.fragments.GroupsFragment
+import sau.odev.usagemonitorLib.WellbeingKit
 import java.util.concurrent.Executors
 
 class MainActivity : AppCompatActivity(),
@@ -36,6 +44,8 @@ class MainActivity : AppCompatActivity(),
     private val executor = Executors.newSingleThreadExecutor()
     private var usageStatsPermissionObserver: ((android.content.Intent?) -> Unit)? = null
 
+    private val prefs by lazy { getSharedPreferences("usage_monitor_prefs", Context.MODE_PRIVATE) }
+
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -43,9 +53,9 @@ class MainActivity : AppCompatActivity(),
 
         database = UsageDatabase.getInstance(applicationContext)
 
-        bottomNavigation = findViewById(R.id.bottom_navigation)
+//        bottomNavigation = findViewById(R.id.bottom_navigation)
 
-        setupNavigation()
+//        setupNavigation()
 
         // Load initial fragment
         if (savedInstanceState == null) {
@@ -58,23 +68,86 @@ class MainActivity : AppCompatActivity(),
 
     override fun onStart() {
         super.onStart()
+
+        maybeRequestIgnoreBatteryOptimizations()
+
         usageStatsPermissionObserver = { intent: android.content.Intent? ->
+//            startActivity(intent)
+        }
+        if (!WellbeingKit.hasNotificationAccess(this)) {
+            val intent = WellbeingKit.notificationAccessSettingsIntent(this)
             startActivity(intent)
         }
-        if (!NotificationTracker.hasPermission(this)) {
-            val intent = AppsUsageManager.getInstance().getNotificationManager().getNotificationListenerPermissionIntent()
+        if (!WellbeingKit.hasUsageStatsAccess(this)) {
+            val intent = WellbeingKit.usageAccessSettingsIntent(this)
             startActivity(intent)
         }
         AppsUsageManager.getInstance()
             .addUsageStatsPermissionObserver(usageStatsPermissionObserver!!)
     }
 
-    override fun onStop() {
-        usageStatsPermissionObserver?.let {
-            AppsUsageManager.getInstance().removeUsageStatsPermissionObserver(it)
-            usageStatsPermissionObserver = null
+    private fun maybeRequestIgnoreBatteryOptimizations() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
+
+        val pm = getSystemService(POWER_SERVICE) as? PowerManager ?: return
+        if (pm.isIgnoringBatteryOptimizations(packageName)) return
+
+        // Don't nag every time. Prompt again after 7 days if still not granted.
+        val now = System.currentTimeMillis()
+        val lastPromptAt = prefs.getLong(PREF_LAST_BATTERY_OPT_PROMPT_AT, 0L)
+        if (lastPromptAt != 0L && (now - lastPromptAt) < BATTERY_OPT_PROMPT_COOLDOWN_MS) return
+
+        AlertDialog.Builder(this)
+            .setTitle("Disable battery optimization")
+            .setMessage(
+                "To track usage reliably in the background, please allow UsageMonitor to ignore battery optimizations. " +
+                    "This helps prevent Android from stopping the monitoring service."
+            )
+            .setPositiveButton("Allow") { _, _ ->
+                prefs.edit().putLong(PREF_LAST_BATTERY_OPT_PROMPT_AT, now).apply()
+                startBatteryOptimizationGrantFlow()
+            }
+            .setNegativeButton("Not now") { _, _ ->
+                prefs.edit().putLong(PREF_LAST_BATTERY_OPT_PROMPT_AT, now).apply()
+            }
+            .setNeutralButton("Open settings") { _, _ ->
+                prefs.edit().putLong(PREF_LAST_BATTERY_OPT_PROMPT_AT, now).apply()
+                openBatteryOptimizationSettingsList()
+            }
+            .show()
+    }
+
+    private fun startBatteryOptimizationGrantFlow() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
+
+        // Preferred: direct request for this package.
+        val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+            data = Uri.parse("package:$packageName")
         }
-        super.onStop()
+
+        try {
+            startActivity(intent)
+        } catch (_: ActivityNotFoundException) {
+            openBatteryOptimizationSettingsList()
+        } catch (_: SecurityException) {
+            // Some OEMs/ROMs can be weird about this.
+            openBatteryOptimizationSettingsList()
+        }
+    }
+
+    private fun openBatteryOptimizationSettingsList() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
+
+        val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+        try {
+            startActivity(intent)
+        } catch (_: ActivityNotFoundException) {
+            Toast.makeText(
+                this,
+                "Couldn't open battery optimization settings. Please disable optimization manually in Settings.",
+                Toast.LENGTH_LONG
+            ).show()
+        }
     }
 
     private fun setupNavigation() {
@@ -88,12 +161,8 @@ class MainActivity : AppCompatActivity(),
                     loadFragment(AppsFragment.newInstance())
                     true
                 }
-                R.id.nav_groups -> {
-                    loadFragment(GroupsFragment.newInstance())
-                    true
-                }
-//                R.id.nav_challenges -> {
-//                    loadFragment(ChallengesFragment.newInstance())
+//                R.id.nav_groups -> {
+//                    loadFragment(GroupsFragment.newInstance())
 //                    true
 //                }
                 else -> false
@@ -410,5 +479,10 @@ class MainActivity : AppCompatActivity(),
         }
 
         dialog.show()
+    }
+
+    companion object {
+        private const val PREF_LAST_BATTERY_OPT_PROMPT_AT = "last_battery_opt_prompt_at"
+        private const val BATTERY_OPT_PROMPT_COOLDOWN_MS = 7L * 24L * 60L * 60L * 1000L // 7 days
     }
 }

@@ -134,5 +134,7 @@ class SessionsProxy internal constructor(private val mSessionsDao: SessionsDao,
 
     internal fun getGroupUsageDuration(groupId: Long, startOfDay: Long, endOfDay: Long): Long = mSessionsDao.getGroupUsageDuration(groupId, startOfDay, endOfDay)
 
+    internal fun getAppSessionCount(appId: Long, from: Long, to: Long): Int = mSessionsDao.getAppSessionCount(appId, from, to)
+
 
 }

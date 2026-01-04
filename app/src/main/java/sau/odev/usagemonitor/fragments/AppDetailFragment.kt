@@ -10,33 +10,43 @@ import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.ImageView
+import android.widget.ProgressBar
 import android.widget.Spinner
 import android.widget.TextView
 import androidx.fragment.app.Fragment
+import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.github.mikephil.charting.charts.BarChart
-import com.github.mikephil.charting.charts.LineChart
 import com.github.mikephil.charting.components.XAxis
 import com.github.mikephil.charting.data.*
 import com.github.mikephil.charting.formatter.ValueFormatter
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import sau.odev.usagemonitor.R
 import sau.odev.usagemonitor.appusagemanager.AppsUsageManager
 import sau.odev.usagemonitor.appusagemanager.UsageDatabase
 import sau.odev.usagemonitor.appusagemanager.sessions.Session
 import sau.odev.usagemonitor.ui.SessionHistoryAdapter
-import java.text.SimpleDateFormat
+import sau.odev.usagemonitorLib.WellbeingKit
+import sau.odev.usagemonitorLib.models.PackageStats
+import java.time.LocalDate
+import java.time.ZoneId
 import java.util.*
-import java.util.concurrent.Executors
 
 class AppDetailFragment : Fragment() {
 
     private lateinit var appIcon: ImageView
     private lateinit var appName: TextView
+    private lateinit var statisticsHeader: TextView
     private lateinit var totalUsageText: TextView
     private lateinit var sessionCountText: TextView
     private lateinit var avgSessionText: TextView
     private lateinit var maxUsageText: TextView
+    private lateinit var sessionsHeader: TextView
     private lateinit var sessionsRecyclerView: RecyclerView
     private lateinit var sessionHistoryAdapter: SessionHistoryAdapter
 
@@ -47,11 +57,29 @@ class AppDetailFragment : Fragment() {
     private lateinit var perSessionChart: BarChart
 
     private lateinit var database: UsageDatabase
-    private val executor = Executors.newSingleThreadExecutor()
 
     private var appId: Long = -1
+    private var selectedDateMillis: Long? = null
     private var currentMetric = ChartMetric.USAGE
     private var currentPeriod = ChartPeriod.DAILY
+
+    private var mainChartJob: Job? = null
+    private var perSessionChartJob: Job? = null
+
+    private lateinit var mainUsageLoading: ProgressBar
+    private lateinit var perSessionLoading: ProgressBar
+
+    private val selectedDay: LocalDate
+        get() {
+            val millis = selectedDateMillis
+            return if (millis != null && millis > 0L) {
+                java.time.Instant.ofEpochMilli(millis)
+                    .atZone(ZoneId.systemDefault())
+                    .toLocalDate()
+            } else {
+                LocalDate.now()
+            }
+        }
 
     enum class ChartMetric {
         USAGE, SESSIONS, NOTIFICATIONS
@@ -63,11 +91,15 @@ class AppDetailFragment : Fragment() {
 
     companion object {
         private const val ARG_APP_ID = "app_id"
+        private const val ARG_SELECTED_DATE_MILLIS = "selected_date_millis"
 
-        fun newInstance(appId: Long): AppDetailFragment {
+        fun newInstance(appId: Long, selectedDateMillis: Long? = null): AppDetailFragment {
             val fragment = AppDetailFragment()
             val args = Bundle()
             args.putLong(ARG_APP_ID, appId)
+            if (selectedDateMillis != null) {
+                args.putLong(ARG_SELECTED_DATE_MILLIS, selectedDateMillis)
+            }
             fragment.arguments = args
             return fragment
         }
@@ -77,6 +109,9 @@ class AppDetailFragment : Fragment() {
         super.onCreate(savedInstanceState)
         arguments?.let {
             appId = it.getLong(ARG_APP_ID)
+            if (it.containsKey(ARG_SELECTED_DATE_MILLIS)) {
+                selectedDateMillis = it.getLong(ARG_SELECTED_DATE_MILLIS)
+            }
         }
     }
 
@@ -101,10 +136,12 @@ class AppDetailFragment : Fragment() {
     private fun initializeViews(view: View) {
         appIcon = view.findViewById(R.id.app_icon)
         appName = view.findViewById(R.id.app_name)
+        statisticsHeader = view.findViewById(R.id.statistics_header)
         totalUsageText = view.findViewById(R.id.total_usage_text)
         sessionCountText = view.findViewById(R.id.session_count_text)
         avgSessionText = view.findViewById(R.id.avg_session_text)
         maxUsageText = view.findViewById(R.id.max_usage_text)
+        sessionsHeader = view.findViewById(R.id.sessions_header)
         sessionsRecyclerView = view.findViewById(R.id.sessions_recycler_view)
 
         // Initialize new components
@@ -113,9 +150,41 @@ class AppDetailFragment : Fragment() {
         mainUsageChart = view.findViewById(R.id.main_usage_chart)
         perSessionChart = view.findViewById(R.id.per_session_chart)
 
+        mainUsageLoading = view.findViewById(R.id.main_usage_loading)
+        perSessionLoading = view.findViewById(R.id.per_session_loading)
+
         setupCharts()
         setupMetricSpinner()
         setupPeriodToggle()
+    }
+
+    private fun updateDateHeaders() {
+        val isToday = selectedDay == LocalDate.now()
+        val dateLabel = if (isToday) {
+            getString(R.string.today)
+        } else {
+            java.text.DateFormat.getDateInstance(java.text.DateFormat.MEDIUM, Locale.getDefault())
+                .format(
+                    Date.from(
+                        selectedDay
+                            .atStartOfDay(ZoneId.systemDefault())
+                            .toInstant()
+                    )
+                )
+        }
+
+        // Keep the current feel: simple bold header + small date hint.
+        statisticsHeader.text = if (isToday) {
+            "${getString(R.string.statistics)} • ${getString(R.string.today)}"
+        } else {
+            "${getString(R.string.statistics)} • $dateLabel"
+        }
+
+        sessionsHeader.text = if (isToday) {
+            "${getString(R.string.sessions)} • ${getString(R.string.today)}"
+        } else {
+            "${getString(R.string.sessions)} • $dateLabel"
+        }
     }
 
     private fun setupRecyclerView() {
@@ -125,82 +194,73 @@ class AppDetailFragment : Fragment() {
     }
 
     private fun loadAppDetails() {
-        executor.execute {
-            try {
-                val app = AppsUsageManager.getInstance().getInstalledApps().getApp(appId)
-                if (app == null) {
-                    activity?.runOnUiThread {
-                        // Handle app not found
-                    }
-                    return@execute
-                }
-
-                // Get today's data
-                val startOfDay = Calendar.getInstance().apply {
-                    set(Calendar.HOUR_OF_DAY, 0)
-                    set(Calendar.MINUTE, 0)
-                    set(Calendar.SECOND, 0)
-                    set(Calendar.MILLISECOND, 0)
-                }.timeInMillis
-
-                val endOfDay = Calendar.getInstance().apply {
-                    set(Calendar.HOUR_OF_DAY, 23)
-                    set(Calendar.MINUTE, 59)
-                    set(Calendar.SECOND, 59)
-                    set(Calendar.MILLISECOND, 999)
-                }.timeInMillis
-
-                val sessions =
-                    database.getSessionDao().getAppSessions(appId, startOfDay, endOfDay).map {
-                        Session(
-                            it.id,
-                            it.appId,
-                            it.groupId,
-                            app.name,
-                            "",
-                            app.packageName,
-                            it.launchTime,
-                            it.visitCount,
-                            it.usageDuration
-                        )
-                    }
-                val totalUsage = sessions.sumOf { it.usageDuration }
-                val sessionCount = sessions.size
-                val avgSession = if (sessionCount > 0) totalUsage / sessionCount else 0
-
-                activity?.runOnUiThread {
-                    appName.text = app.name
-
-                    // Load app icon
-                    try {
-                        val icon =
-                            requireActivity().packageManager.getApplicationIcon(app.packageName)
-                        appIcon.setImageDrawable(icon)
-                    } catch (e: Exception) {
-                        appIcon.setImageResource(R.mipmap.ic_launcher)
-                    }
-
-                    totalUsageText.text = formatDuration(totalUsage)
-                    sessionCountText.text = "$sessionCount"
-                    avgSessionText.text = formatDuration(avgSession)
-
-                    if (app.maxUsagePerDayInSeconds > 0) {
-                        maxUsageText.text =
-                            formatDuration(app.maxUsagePerDayInSeconds.toLong() * 1000)
-                    } else {
-                        maxUsageText.text = "No limit set"
-                    }
-
-                    // Update session history
-                    sessionHistoryAdapter.updateData(sessions)
-
-                    // Load chart data
-                    loadMainChart()
-                    loadPerSessionChart()
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
+        lifecycleScope.launch {
+            val app = AppsUsageManager.getInstance().getInstalledApps().getApp(appId)
+            if (app == null) {
+                // Handle app not found
+                return@launch
             }
+
+            withContext(Dispatchers.Main) {
+                updateDateHeaders()
+            }
+
+            val appStats = WellbeingKit.getDailyPackageStats(selectedDay)
+                .firstOrNull() { it.packageName == app.packageName } ?: PackageStats(
+                app.packageName, 0, 0, 0
+                )
+
+
+            withContext(Dispatchers.Main) {
+
+                appName.text = app.name
+
+                // Load app icon
+                try {
+                    val icon =
+                        requireActivity().packageManager.getApplicationIcon(app.packageName)
+                    appIcon.setImageDrawable(icon)
+                } catch (_: Exception) {
+                    appIcon.setImageResource(R.mipmap.ic_launcher)
+                }
+
+                totalUsageText.text = formatDuration(appStats.usageTimeMs)
+                sessionCountText.text = "${appStats.launchCount}"
+
+                val avgSession = if (appStats.launchCount > 0)
+                    appStats.usageTimeMs / appStats.launchCount else 0
+                avgSessionText.text = formatDuration(avgSession)
+
+                if (app.maxUsagePerDayInSeconds > 0) {
+                    maxUsageText.text =
+                        formatDuration(app.maxUsagePerDayInSeconds.toLong() * 1000)
+                } else {
+                    maxUsageText.text = "No limit set"
+                }
+            }
+            val sessions = WellbeingKit.getDailyAppSessions(app.packageName, selectedDay)
+                .map {
+                    Session(
+                        0,
+                        appId,
+                        0,
+                        app.name,
+                        "",
+                        app.packageName,
+                        it.sessionStartMs,
+                        1,
+                        it.durationMs
+                    )
+                }
+
+            // Update session history
+            withContext(Dispatchers.Main) {
+                sessionHistoryAdapter.updateData(sessions)
+            }
+
+            // Load chart data
+            loadMainChart()
+            loadPerSessionChart()
         }
     }
 
@@ -245,6 +305,14 @@ class AppDetailFragment : Fragment() {
                 gridColor = Color.LTGRAY
                 textColor = color
                 axisMinimum = 0f
+                valueFormatter = object : ValueFormatter() {
+                    override fun getFormattedValue(value: Float): String {
+                        if (currentMetric == ChartMetric.USAGE) {
+                            return formatDuration(value.toLong())
+                        }
+                        return if (value <= 0) "" else value.toInt().toString()
+                    }
+                }
             }
 
             axisRight.isEnabled = false
@@ -318,129 +386,137 @@ class AppDetailFragment : Fragment() {
         }
     }
 
+    private fun setMainChartLoading(isLoading: Boolean) {
+        mainUsageLoading.visibility = if (isLoading) View.VISIBLE else View.GONE
+        mainUsageChart.isEnabled = !isLoading
+    }
+
+    private fun setPerSessionChartLoading(isLoading: Boolean) {
+        perSessionLoading.visibility = if (isLoading) View.VISIBLE else View.GONE
+        perSessionChart.isEnabled = !isLoading
+    }
+
     private fun loadMainChart() {
         val nightModeFlags = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
-        val _color = if (nightModeFlags == Configuration.UI_MODE_NIGHT_YES) {
+        val chartValueTextColor = if (nightModeFlags == Configuration.UI_MODE_NIGHT_YES) {
             Color.WHITE
         } else {
             Color.BLACK
         }
-        executor.execute {
+
+        mainChartJob?.cancel()
+
+        mainChartJob = viewLifecycleOwner.lifecycleScope.launch {
+            setMainChartLoading(true)
             try {
+                val app =
+                    AppsUsageManager.getInstance().getInstalledApps().getApp(appId) ?: return@launch
+
                 val entries = mutableListOf<BarEntry>()
                 val labels = mutableListOf<String>()
 
                 if (currentPeriod == ChartPeriod.DAILY) {
-                    // Get last 7 days
-                    val dateFormat = SimpleDateFormat("EEE", Locale.getDefault())
-                    for (i in 6 downTo 0) {
-                        val calendar = Calendar.getInstance().apply {
-                            add(Calendar.DAY_OF_YEAR, -i)
+                    val daily = WellbeingKit.getPackageStatsDaily(
+                        app.packageName,
+                        selectedDay.minusDays(30),
+                        selectedDay
+                    ).filter {
+                        it.launchCount > 0 || it.usageTimeMs > 0 || it.notificationCount > 0
+                    }
+
+                    daily.forEachIndexed { index, stats ->
+                        ensureActive()
+
+                        val startDay = Calendar.getInstance().apply {
+                            add(Calendar.DAY_OF_YEAR, -index)
                             set(Calendar.HOUR_OF_DAY, 0)
                             set(Calendar.MINUTE, 0)
                             set(Calendar.SECOND, 0)
                             set(Calendar.MILLISECOND, 0)
                         }
-
-                        val startOfDay = calendar.timeInMillis
-                        val endOfDay = calendar.apply {
+                        val endDay = Calendar.getInstance().apply {
+                            add(Calendar.DAY_OF_YEAR, -index)
                             set(Calendar.HOUR_OF_DAY, 23)
                             set(Calendar.MINUTE, 59)
                             set(Calendar.SECOND, 59)
                             set(Calendar.MILLISECOND, 999)
-                        }.timeInMillis
+                        }
 
                         val value = when (currentMetric) {
-                            ChartMetric.USAGE -> {
-                                val usage = database.getSessionDao()
-                                    .getAppUsageDuration(appId, startOfDay, endOfDay)
-                                usage / (1000f * 60 * 60) // Convert to hours
-                            }
-
-                            ChartMetric.SESSIONS -> {
-                                database.getSessionDao()
-                                    .getAppSessionCount(appId, startOfDay, endOfDay).toFloat()
-                            }
-
-                            ChartMetric.NOTIFICATIONS -> {
-                                val app =
-                                    AppsUsageManager.getInstance().getInstalledApps().getApp(appId)
-                                if (app != null) {
-                                    database.getNotificationsDao()
-                                        .getNotificationCountByPackageInTimeRange(
-                                            app.packageName, startOfDay, endOfDay
-                                        ).toFloat()
-                                } else 0f
+                            ChartMetric.USAGE -> stats.usageTimeMs.toFloat()
+                            ChartMetric.SESSIONS -> stats.launchCount.toFloat()
+                            ChartMetric.NOTIFICATIONS -> withContext(Dispatchers.IO) {
+                                database.getNotificationsDao()
+                                    .getNotificationCountByPackageInTimeRange(
+                                        app.packageName,
+                                        startDay.timeInMillis,
+                                        endDay.timeInMillis
+                                    ).toFloat()
                             }
                         }
 
-                        entries.add(BarEntry((6 - i).toFloat(), value))
-                        labels.add(dateFormat.format(calendar.time))
+                        entries.add(BarEntry(index.toFloat(), value))
+                        labels.add(stats.periodStart.dayOfWeek.name.substring(0, 3))
                     }
                 } else {
-                    // Get last 4 weeks
-                    for (i in 3 downTo 0) {
-                        val calendar = Calendar.getInstance().apply {
-                            add(Calendar.WEEK_OF_YEAR, -i)
-                            set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
+                    val weekly = WellbeingKit.getPackageStatsWeekly(
+                        app.packageName,
+                        selectedDay.minusWeeks(12),
+                        selectedDay
+                    ).filter {
+                        it.launchCount > 0 || it.usageTimeMs > 0 || it.notificationCount > 0
+                    }
+
+                    weekly.forEachIndexed { index, stats ->
+                        ensureActive()
+
+                        val startDay = Calendar.getInstance().apply {
+                            add(Calendar.DAY_OF_YEAR, -index)
                             set(Calendar.HOUR_OF_DAY, 0)
                             set(Calendar.MINUTE, 0)
                             set(Calendar.SECOND, 0)
                             set(Calendar.MILLISECOND, 0)
                         }
-
-                        val startOfWeek = calendar.timeInMillis
-                        val endOfWeek = calendar.apply {
-                            add(Calendar.DAY_OF_YEAR, 6)
+                        val endDay = Calendar.getInstance().apply {
+                            add(Calendar.DAY_OF_YEAR, -index)
                             set(Calendar.HOUR_OF_DAY, 23)
                             set(Calendar.MINUTE, 59)
                             set(Calendar.SECOND, 59)
                             set(Calendar.MILLISECOND, 999)
-                        }.timeInMillis
+                        }
 
                         val value = when (currentMetric) {
-                            ChartMetric.USAGE -> {
-                                val usage = database.getSessionDao()
-                                    .getAppUsageDuration(appId, startOfWeek, endOfWeek)
-                                usage / (1000f * 60 * 60) // Convert to hours
-                            }
-
-                            ChartMetric.SESSIONS -> {
-                                database.getSessionDao()
-                                    .getAppSessionCount(appId, startOfWeek, endOfWeek).toFloat()
-                            }
-
-                            ChartMetric.NOTIFICATIONS -> {
-                                val app =
-                                    AppsUsageManager.getInstance().getInstalledApps().getApp(appId)
-                                if (app != null) {
-                                    database.getNotificationsDao()
-                                        .getNotificationCountByPackageInTimeRange(
-                                            app.packageName, startOfWeek, endOfWeek
-                                        ).toFloat()
-                                } else 0f
+                            ChartMetric.USAGE -> stats.usageTimeMs.toFloat()
+                            ChartMetric.SESSIONS -> stats.launchCount.toFloat()
+                            ChartMetric.NOTIFICATIONS -> withContext(Dispatchers.IO) {
+                                database.getNotificationsDao()
+                                    .getNotificationCountByPackageInTimeRange(
+                                        app.packageName,
+                                        startDay.timeInMillis,
+                                        endDay.timeInMillis
+                                    ).toFloat()
                             }
                         }
 
-                        entries.add(BarEntry((3 - i).toFloat(), value))
-
-                        val weekLabel = SimpleDateFormat("MMM dd", Locale.getDefault())
-                        labels.add(weekLabel.format(calendar.time))
+                        entries.add(BarEntry(index.toFloat(), value))
+                        labels.add("Wk ${stats.periodStart.dayOfYear / 7 + 1}")
                     }
                 }
 
+                ensureActive()
 
+                withContext(Dispatchers.Main) {
+                    if (mainChartJob !== this@launch) return@withContext
 
-                activity?.runOnUiThread {
                     val dataSet = BarDataSet(entries, "").apply {
                         color = Color.parseColor("#2196F3")
-                        valueTextColor = _color
+                        valueTextColor = chartValueTextColor
                         valueTextSize = 10f
                         valueFormatter = object : ValueFormatter() {
                             override fun getFormattedValue(value: Float): String {
                                 if (value <= 0) return ""
                                 return when (currentMetric) {
-                                    ChartMetric.USAGE -> String.format("%.1fh", value)
+                                    ChartMetric.USAGE -> formatDuration(value.toLong())
                                     ChartMetric.SESSIONS -> String.format("%.0f", value)
                                     ChartMetric.NOTIFICATIONS -> String.format("%.0f", value)
                                 }
@@ -456,56 +532,67 @@ class AppDetailFragment : Fragment() {
                     }
                     mainUsageChart.invalidate()
                 }
-            } catch (e: Exception) {
-                e.printStackTrace()
+            } finally {
+                if (mainChartJob === this@launch) {
+                    withContext(Dispatchers.Main) { setMainChartLoading(false) }
+                }
             }
         }
     }
 
     private fun loadPerSessionChart() {
         val nightModeFlags = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
-        val _color = if (nightModeFlags == Configuration.UI_MODE_NIGHT_YES) {
+        val chartValueTextColor = if (nightModeFlags == Configuration.UI_MODE_NIGHT_YES) {
             Color.WHITE
         } else {
             Color.BLACK
         }
-        executor.execute {
+
+        perSessionChartJob?.cancel()
+
+        perSessionChartJob = viewLifecycleOwner.lifecycleScope.launch {
+            setPerSessionChartLoading(true)
             try {
+                val app =
+                    AppsUsageManager.getInstance().getInstalledApps().getApp(appId) ?: return@launch
+
+                val sessions = WellbeingKit.getDailyAppSessions(app.packageName, selectedDay)
+                    .map {
+                        Session(
+                            0,
+                            appId,
+                            0,
+                            app.name,
+                            "",
+                            app.packageName,
+                            it.sessionStartMs,
+                            1,
+                            it.durationMs
+                        )
+                    }
+
                 val entries = mutableListOf<BarEntry>()
                 val labels = mutableListOf<String>()
 
-                // Get today's start and end
-                val startOfDay = Calendar.getInstance().apply {
-                    set(Calendar.HOUR_OF_DAY, 0)
-                    set(Calendar.MINUTE, 0)
-                    set(Calendar.SECOND, 0)
-                    set(Calendar.MILLISECOND, 0)
-                }.timeInMillis
-
-                val endOfDay = Calendar.getInstance().apply {
-                    set(Calendar.HOUR_OF_DAY, 23)
-                    set(Calendar.MINUTE, 59)
-                    set(Calendar.SECOND, 59)
-                    set(Calendar.MILLISECOND, 999)
-                }.timeInMillis
-
-                val sessions = database.getSessionDao().getAppSessions(appId, startOfDay, endOfDay)
-
                 sessions.forEachIndexed { index, session ->
+                    ensureActive()
                     val minutes = session.usageDuration / (1000f * 60)
                     entries.add(BarEntry(index.toFloat(), minutes))
                     labels.add("#${index + 1}")
                 }
 
-                activity?.runOnUiThread {
+                ensureActive()
+
+                withContext(Dispatchers.Main) {
+                    if (perSessionChartJob !== this@launch) return@withContext
+
                     if (entries.isEmpty()) {
-                        // Show empty chart
                         perSessionChart.clear()
                         perSessionChart.invalidate()
                     } else {
                         val dataSet = BarDataSet(entries, "").apply {
                             color = Color.parseColor("#FF9800")
-                            valueTextColor = color
+                            valueTextColor = chartValueTextColor
                             valueTextSize = 10f
                             valueFormatter = object : ValueFormatter() {
                                 override fun getFormattedValue(value: Float): String {
@@ -523,10 +610,11 @@ class AppDetailFragment : Fragment() {
                         perSessionChart.invalidate()
                     }
                 }
-            } catch (e: Exception) {
-                e.printStackTrace()
+            } finally {
+                if (perSessionChartJob === this@launch) {
+                    withContext(Dispatchers.Main) { setPerSessionChartLoading(false) }
+                }
             }
         }
     }
 }
-

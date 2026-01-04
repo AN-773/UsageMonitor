@@ -63,7 +63,9 @@
     <string name="usage_by_group">Usage by Group</string>
     <string name="usage_by_app">Usage by App</string>
     <string name="sessions">sessions</string>
+    <string name="statistics">Statistics</string>
     <string name="no_usage_data">No usage data available</string>
     <string name="unlocks">Unlocks</string>
     <string name="notifications">Notifications</string>
+    <string name="apps">Apps</string>
 </resources>

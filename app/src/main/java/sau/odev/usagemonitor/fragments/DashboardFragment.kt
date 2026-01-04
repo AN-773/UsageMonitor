@@ -4,12 +4,14 @@ import android.app.DatePickerDialog
 import android.content.res.Configuration
 import android.graphics.Color
 import android.os.Bundle
+import android.text.format.DateFormat
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.TextView
 import androidx.fragment.app.Fragment
+import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.adapter.FragmentStateAdapter
@@ -19,21 +21,26 @@ import com.github.mikephil.charting.data.Entry
 import com.github.mikephil.charting.data.PieData
 import com.github.mikephil.charting.data.PieDataSet
 import com.github.mikephil.charting.data.PieEntry
-import com.github.mikephil.charting.formatter.PercentFormatter
-import com.github.mikephil.charting.formatter.ValueFormatter
 import com.github.mikephil.charting.highlight.Highlight
 import com.github.mikephil.charting.listener.OnChartValueSelectedListener
 import com.google.android.material.tabs.TabLayout
 import com.google.android.material.tabs.TabLayoutMediator
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import sau.odev.usagemonitor.R
 import sau.odev.usagemonitor.appusagemanager.UsageDatabase
 import sau.odev.usagemonitor.ui.AppUsageAdapter
 import sau.odev.usagemonitor.ui.AppUsageData
 import sau.odev.usagemonitor.ui.GroupUsageAdapter
-import sau.odev.usagemonitor.ui.GroupUsageData
-import java.text.SimpleDateFormat
-import java.util.*
+import sau.odev.usagemonitorLib.WellbeingKit
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.util.Calendar
 import java.util.concurrent.Executors
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+import kotlinx.coroutines.CancellationException
 
 class DashboardFragment : Fragment() {
 
@@ -41,10 +48,13 @@ class DashboardFragment : Fragment() {
     private lateinit var screenSessionsCountText: TextView
     private lateinit var unlocksCountText: TextView
     private lateinit var notificationsCountText: TextView
-//    private lateinit var datePickerButton: Button
+
+    private lateinit var swipeRefresh: SwipeRefreshLayout
+    private lateinit var datePickerButton: Button
     private lateinit var usageTabs: TabLayout
     private lateinit var usageViewPager: ViewPager2
     private lateinit var usagePieChart: PieChart
+    private lateinit var loadingOverlay: View
 
     private lateinit var groupUsageAdapter: GroupUsageAdapter
     private lateinit var appUsageAdapter: AppUsageAdapter
@@ -53,6 +63,21 @@ class DashboardFragment : Fragment() {
     private val executor = Executors.newSingleThreadExecutor()
 
     private var selectedDate = Calendar.getInstance()
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        savedInstanceState?.getLong(STATE_SELECTED_DATE_MILLIS)?.let { millis ->
+            if (millis > 0L) {
+                selectedDate = Calendar.getInstance().apply { timeInMillis = millis }
+            }
+        }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putLong(STATE_SELECTED_DATE_MILLIS, selectedDate.timeInMillis)
+        super.onSaveInstanceState(outState)
+    }
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -79,16 +104,22 @@ class DashboardFragment : Fragment() {
         screenSessionsCountText = view.findViewById(R.id.screen_sessions_count)
         unlocksCountText = view.findViewById(R.id.unlocks_count)
         notificationsCountText = view.findViewById(R.id.notifications_count)
-//        datePickerButton = view.findViewById(R.id.date_picker_button)
+        swipeRefresh = view.findViewById(R.id.swipe_refresh)
+        datePickerButton = view.findViewById(R.id.date_picker_button)
         usageTabs = view.findViewById(R.id.usage_tabs)
         usageViewPager = view.findViewById(R.id.usage_viewpager)
         usagePieChart = view.findViewById(R.id.usage_pie_chart)
+        loadingOverlay = view.findViewById(R.id.loading_overlay)
+
+        // Match app theme feel
+        swipeRefresh.setColorSchemeResources(R.color.purple_500)
 
         setupPieChart()
     }
 
     private fun setupPieChart() {
         usagePieChart.apply {
+            setNoDataText("")
             description.isEnabled = false
 
             // Enable entry labels (app names beside sections)
@@ -155,15 +186,14 @@ class DashboardFragment : Fragment() {
 
         TabLayoutMediator(usageTabs, usageViewPager) { tab, position ->
             tab.text = when (position) {
-                0 -> getString(R.string.usage_by_app)
-                1 -> getString(R.string.usage_by_group)
+                0 -> getString(R.string.apps)
                 else -> ""
             }
         }.attach()
     }
 
-    inner class UsagePagerAdapter(fragment: Fragment) : FragmentStateAdapter(fragment) {
-        override fun getItemCount(): Int = 2
+    class UsagePagerAdapter(fragment: Fragment) : FragmentStateAdapter(fragment) {
+        override fun getItemCount(): Int = 1
 
         override fun createFragment(position: Int): Fragment {
             return when (position) {
@@ -179,7 +209,11 @@ class DashboardFragment : Fragment() {
             fun newInstance() = GroupUsageSubFragment()
         }
 
-        override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
+        override fun onCreateView(
+            inflater: LayoutInflater,
+            container: ViewGroup?,
+            savedInstanceState: Bundle?
+        ): View {
             return inflater.inflate(R.layout.fragment_usage_list, container, false)
         }
 
@@ -199,7 +233,11 @@ class DashboardFragment : Fragment() {
             fun newInstance() = AppUsageSubFragment()
         }
 
-        override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
+        override fun onCreateView(
+            inflater: LayoutInflater,
+            container: ViewGroup?,
+            savedInstanceState: Bundle?
+        ): View {
             return inflater.inflate(R.layout.fragment_usage_list, container, false)
         }
 
@@ -215,37 +253,90 @@ class DashboardFragment : Fragment() {
     }
 
     private fun setupListeners() {
-//        datePickerButton.setOnClickListener {
-//            showDatePicker()
-//        }
-//
-//        updateDateButtonText()
+        swipeRefresh.setOnRefreshListener {
+            loadDashboardData()
+        }
+        datePickerButton.setOnClickListener { showDatePicker() }
+        updateDateButtonText()
     }
 
     private fun showDatePicker() {
-        val datePickerDialog = DatePickerDialog(
-            requireContext(),
-            { _, year, month, dayOfMonth ->
-                selectedDate.set(Calendar.YEAR, year)
-                selectedDate.set(Calendar.MONTH, month)
-                selectedDate.set(Calendar.DAY_OF_MONTH, dayOfMonth)
-                updateDateButtonText()
-                loadDashboardData()
-            },
-            selectedDate.get(Calendar.YEAR),
-            selectedDate.get(Calendar.MONTH),
-            selectedDate.get(Calendar.DAY_OF_MONTH)
-        )
-        datePickerDialog.show()
+        val today = Calendar.getInstance()
+
+        // Fetch minDate asynchronously (DB query) before showing the picker.
+        lifecycleScope.launch {
+            val minDateMillis = try {
+                withContext(Dispatchers.IO) {
+                    val oldest = WellbeingKit.getOldestUsageTimestampMsOrNull()
+                    oldest?.let { toStartOfDayMillis(it) }
+                }
+            } catch (_: CancellationException) {
+                null
+            } catch (_: Exception) {
+                null
+            }
+
+            if (!isAdded) return@launch
+
+            val datePickerDialog = DatePickerDialog(
+                requireContext(),
+                { _, year, month, dayOfMonth ->
+                    val picked = Calendar.getInstance().apply {
+                        set(Calendar.YEAR, year)
+                        set(Calendar.MONTH, month)
+                        set(Calendar.DAY_OF_MONTH, dayOfMonth)
+                        // Normalize time component
+                        set(Calendar.HOUR_OF_DAY, 0)
+                        set(Calendar.MINUTE, 0)
+                        set(Calendar.SECOND, 0)
+                        set(Calendar.MILLISECOND, 0)
+                    }
+
+                    // Guard against future dates.
+                    if (picked.after(today)) return@DatePickerDialog
+
+                    // Guard against dates earlier than our oldest stored day.
+                    if (minDateMillis != null && picked.timeInMillis < minDateMillis) {
+                        picked.timeInMillis = minDateMillis
+                    }
+
+                    selectedDate = picked
+                    updateDateButtonText()
+                    loadDashboardData()
+                },
+                selectedDate.get(Calendar.YEAR),
+                selectedDate.get(Calendar.MONTH),
+                selectedDate.get(Calendar.DAY_OF_MONTH)
+            )
+
+            // Prevent selecting dates in the future.
+            datePickerDialog.datePicker.maxDate = today.timeInMillis
+
+            // Prevent selecting dates older than the stored dataset (when known).
+            minDateMillis?.let { datePickerDialog.datePicker.minDate = it }
+
+            datePickerDialog.show()
+        }
+    }
+
+    private fun toStartOfDayMillis(epochMillis: Long): Long {
+        val localDate = Instant.ofEpochMilli(epochMillis)
+            .atZone(ZoneId.systemDefault())
+            .toLocalDate()
+
+        return localDate
+            .atStartOfDay(ZoneId.systemDefault())
+            .toInstant()
+            .toEpochMilli()
     }
 
     private fun updateDateButtonText() {
         val today = Calendar.getInstance()
-        if (isSameDay(selectedDate, today)) {
-//            datePickerButton.text = getString(R.string.today)
+        datePickerButton.text = if (isSameDay(selectedDate, today)) {
+            getString(R.string.today)
         } else {
-            val sdf = SimpleDateFormat("MMM dd, yyyy", Locale.getDefault())
-//            datePickerButton.text = sdf.format(selectedDate.time)
+            // Locale-aware date formatting
+            DateFormat.getMediumDateFormat(requireContext()).format(selectedDate.time)
         }
     }
 
@@ -255,103 +346,137 @@ class DashboardFragment : Fragment() {
                 cal1.get(Calendar.DAY_OF_MONTH) == cal2.get(Calendar.DAY_OF_MONTH)
     }
 
+    private fun selectedLocalDate(): LocalDate {
+        return selectedDate
+            .toInstant()
+            .atZone(ZoneId.systemDefault())
+            .toLocalDate()
+    }
+
+    private fun selectedDayRangeMillis(): Pair<Long, Long> {
+        val startOfDay = Calendar.getInstance().apply {
+            timeInMillis = selectedDate.timeInMillis
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+
+        val endOfDay = Calendar.getInstance().apply {
+            timeInMillis = selectedDate.timeInMillis
+            set(Calendar.HOUR_OF_DAY, 23)
+            set(Calendar.MINUTE, 59)
+            set(Calendar.SECOND, 59)
+            set(Calendar.MILLISECOND, 999)
+        }.timeInMillis
+
+        return startOfDay to endOfDay
+    }
+
     private fun loadDashboardData() {
-        executor.execute {
-            try {
-                val startOfDay = Calendar.getInstance().apply {
-                    timeInMillis = selectedDate.timeInMillis
-                    set(Calendar.HOUR_OF_DAY, 0)
-                    set(Calendar.MINUTE, 0)
-                    set(Calendar.SECOND, 0)
-                    set(Calendar.MILLISECOND, 0)
-                }.timeInMillis
+        // If a full-screen load is already active, avoid double spinners.
+        if (loadingOverlay.visibility == View.VISIBLE) {
+            swipeRefresh.isRefreshing = false
+            return
+        }
 
-                val endOfDay = Calendar.getInstance().apply {
-                    timeInMillis = selectedDate.timeInMillis
-                    set(Calendar.HOUR_OF_DAY, 23)
-                    set(Calendar.MINUTE, 59)
-                    set(Calendar.SECOND, 59)
-                    set(Calendar.MILLISECOND, 999)
-                }.timeInMillis
+        lifecycleScope.launch {
+            withContext(Dispatchers.Main) {
+                loadingOverlay.visibility = View.VISIBLE
+            }
 
-                val screenSessions = database.getScreenSessionDao().getScreenSessions(startOfDay, endOfDay)
-                val totalScreenTime = screenSessions.sumOf { it.usageDuration }
-                val sessionCount = screenSessions.size
+            val selectedDay = selectedLocalDate()
+
+            val (_, appUsageDataList) = withContext(Dispatchers.IO) {
+                val now = System.currentTimeMillis()
+                while (!WellbeingKit.hasUsageStatsAccess(this@DashboardFragment.context!!)) {
+                    // Wait until access is granted
+                    Thread.sleep(500)
+                }
+                // Only incremental sync for "today".
+                if (isSameDay(selectedDate, Calendar.getInstance())) {
+                    WellbeingKit.syncUsageIncremental(now)
+                }
 
                 val apps = database.getAppsDao().getAllApps()
-                val groups = database.getGroupsDao().getGroups()
-                val appsMap = apps.associateBy { it.id }
-                val groupsMap = groups.associateBy { it.id }
+                val ignoredApps = apps.filter { it.ignored }.map { it.packageName }.toSet()
 
-                val appSessions = database.getSessionDao().getAppsUsageOrderByUsageTime(startOfDay, endOfDay)
-
-                val appUsageDataList = appSessions.mapNotNull { session ->
-                    val app = appsMap[session.appId]
-                    app?.let {
-                        val sessions = database.getSessionDao().getAppSessions(app.id, startOfDay, endOfDay)
-                        AppUsageData(
-                            appId = app.id,
-                            appName = app.name,
-                            packageName = app.packageName,
-                            category = app.category,
-                            usageDurationSeconds = session.usageDuration / 1000,
-                            maxUsageSeconds = app.maxUsagePerDayInSeconds,
-                            sessionCount = sessions.size
-                        )
-                    }
+                val appsDailyUsage = WellbeingKit.getDailyPackageStats(selectedDay).filter {
+                    it.packageName !in ignoredApps
                 }
 
-                val groupSessions = database.getSessionDao().getGroupsUsageOrderByUsageTime(startOfDay, endOfDay)
+                val appUsageDataList = apps.mapNotNull { app ->
+                    if (!app.installed) return@mapNotNull null
+                    val session = appsDailyUsage.find { it.packageName == app.packageName }
 
-                val groupUsageDataList = groupSessions.mapNotNull { session ->
-                    val group = groupsMap[session.groupId]
-                    group?.let {
-                        GroupUsageData(
-                            groupId = group.id,
-                            groupName = group.name,
-                            groupIcon = group.icon,
-                            usageDurationSeconds = session.usageDuration / 1000,
-                            maxUsageSeconds = group.maxUsagePerDayInSeconds,
-                            totalUsageSeconds = totalScreenTime
-                        )
-                    }
-                }
+                    AppUsageData(
+                        appId = app.id,
+                        appName = app.name,
+                        packageName = app.packageName,
+                        category = app.category,
+                        usageDurationSeconds = (session?.usageTimeMs ?: 0) / 1000,
+                        maxUsageSeconds = app.maxUsagePerDayInSeconds,
+                        sessionCount = session?.launchCount ?: 0
+                    )
+                }.sortedByDescending { it.usageDurationSeconds }
+
+                Pair(Unit, appUsageDataList)
+            }
+
+            withContext(Dispatchers.Main) {
+                appUsageAdapter.updateData(appUsageDataList)
+                updatePieChart(appUsageDataList)
+                loadingOverlay.visibility = View.GONE
+                swipeRefresh.isRefreshing = false
+            }
+        }
+
+        executor.execute {
+            try {
+                val (startOfDay, endOfDay) = selectedDayRangeMillis()
+
+                val screenSessions =
+                    database.getScreenSessionDao().getScreenSessions(startOfDay, endOfDay)
+                val totalScreenTime = if (screenSessions.isNotEmpty())  screenSessions.sumOf { it.usageDuration } else -1L
+                val sessionCount = screenSessions.size
 
                 // Calculate total notifications count for the day
                 val totalNotificationsCount = try {
                     val notificationsDao = database.getNotificationsDao()
-                    val allNotifications = notificationsDao.getNotificationsInTimeRange(startOfDay, endOfDay)
+                    val allNotifications =
+                        notificationsDao.getNotificationsInTimeRange(startOfDay, endOfDay)
                     allNotifications.size
-                } catch (e: Exception) {
+                } catch (_: Exception) {
                     0 // If notification tracking not available yet
                 }
 
                 activity?.runOnUiThread {
-                    totalScreenTimeText.text = formatDuration(totalScreenTime)
+                    totalScreenTimeText.text = if (totalScreenTime != -1L) formatDuration(totalScreenTime) else "No data"
 
-                    val dateText = if (isSameDay(selectedDate, Calendar.getInstance())) {
-                        "Today"
+                    screenSessionsCountText.text = if (isSameDay(selectedDate, Calendar.getInstance())) {
+                        getString(R.string.today)
                     } else {
-                        val sdf = SimpleDateFormat("MMM dd", Locale.getDefault())
-                        "${sdf.format(selectedDate.time)}"
+                        DateFormat.getMediumDateFormat(requireContext()).format(selectedDate.time)
                     }
-                    screenSessionsCountText.text = dateText
 
                     // Update unlocks count (screen sessions count)
-                    unlocksCountText.text = sessionCount.toString()
+                    unlocksCountText.text = if (totalScreenTime != -1L)  sessionCount.toString() else "No data"
 
                     // Update notifications count
-                    notificationsCountText.text = totalNotificationsCount.toString()
+                    notificationsCountText.text = if (totalNotificationsCount > 0) totalNotificationsCount.toString() else "No data"
 
-                    appUsageAdapter.updateData(appUsageDataList)
-                    groupUsageAdapter.updateData(groupUsageDataList)
-
-                    updatePieChart(appUsageDataList)
+                    swipeRefresh.isRefreshing = false
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
                 activity?.runOnUiThread {
                     totalScreenTimeText.text = "Error loading data"
+                    swipeRefresh.isRefreshing = false
+                }
+            } finally {
+                activity?.runOnUiThread {
+                    loadingOverlay.visibility = View.GONE
+                    swipeRefresh.isRefreshing = false
                 }
             }
         }
@@ -450,7 +575,7 @@ class DashboardFragment : Fragment() {
     }
 
     private fun navigateToAppDetail(appId: Long) {
-        val fragment = AppDetailFragment.newInstance(appId)
+        val fragment = AppDetailFragment.newInstance(appId, selectedDate.timeInMillis)
         parentFragmentManager.beginTransaction()
             .replace(R.id.fragment_container, fragment)
             .addToBackStack(null)
@@ -466,7 +591,8 @@ class DashboardFragment : Fragment() {
     }
 
     companion object {
+        private const val STATE_SELECTED_DATE_MILLIS = "state_selected_date_millis"
+
         fun newInstance() = DashboardFragment()
     }
 }
-

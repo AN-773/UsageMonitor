@@ -13,7 +13,6 @@ import sau.odev.usagemonitor.appusagemanager.apps.InstalledApps
 import sau.odev.usagemonitor.appusagemanager.challenges.ChallengesManager
 import sau.odev.usagemonitor.appusagemanager.challenges.CreatedChallenges
 import sau.odev.usagemonitor.appusagemanager.groups.CreatedGroups
-import sau.odev.usagemonitor.appusagemanager.notifications.NotificationTracker
 import sau.odev.usagemonitor.appusagemanager.sessions.CurrentScreenSessionsTracker
 import sau.odev.usagemonitor.appusagemanager.sessions.SessionsProxy
 import sau.odev.usagemonitor.appusagemanager.settings.IDeviceUsageSettings
@@ -35,6 +34,7 @@ class AppsUsageManager private constructor(private val context: Context,
     private val challengeManager: ChallengesManager = ChallengesManager(db.getChallengesDao(), mSessionsProxy, installedApps)
     private val createdChallenges: CreatedChallenges = CreatedChallenges(context, challengeManager, installedApps, createdGroups)
     private val mRunningAppManager: RunningAppManager = RunningAppManager(context)
+    private val usageStatsSync: UsageStatsSync = UsageStatsSync(mRunningAppManager, installedApps, db.getSessionDao(), db.getScreenSessionDao(), db.getUsageStatsDao())
     private val alertsManagerWrapper = AlertsManagerWrapper()
     private val settings: Settings = Settings(context)
     private val notificationManager: sau.odev.usagemonitor.appusagemanager.notifications.NotificationManager =
@@ -94,8 +94,16 @@ class AppsUsageManager private constructor(private val context: Context,
 
     fun isUsageStatesPermissionGranted(): Boolean = mRunningAppManager.isPermissionGranted()
 
+    //UsageStatsSync - for syncing data from UsageStatsManager
+    fun getUsageStatsSync(): UsageStatsSync = usageStatsSync
+
     //NotificationManager
     fun getNotificationManager(): sau.odev.usagemonitor.appusagemanager.notifications.NotificationManager = notificationManager
+
+    // Get apps usage stats directly from UsageStatsManager
+    fun getAppsUsageStats(startTime: Long, endTime: Long, interval: Int = android.app.usage.UsageStatsManager.INTERVAL_DAILY): Map<String, AppUsageInfo> {
+        return mRunningAppManager.getAppsUsageStats(startTime, endTime, interval)
+    }
 
     //RunningAppObserver Proxy
     fun startObserving() {

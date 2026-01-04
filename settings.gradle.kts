@@ -22,5 +22,5 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "UsageMonitor"
+include(":UsageMonitorLib")
 include(":app")
- 

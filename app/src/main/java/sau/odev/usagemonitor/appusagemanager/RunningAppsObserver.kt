@@ -31,7 +31,7 @@ import kotlin.math.max
 internal var sDelayScan = 1000L
 
 class RunningAppsObserver internal constructor(
-    context: Context,
+    private val context: Context,
     private val mRunningAppManager: RunningAppManager,
     private val mInstalledApps: InstalledApps,
     private val mCreatedGroups: CreatedGroups,
@@ -50,11 +50,13 @@ class RunningAppsObserver internal constructor(
     private val LAST_SCREEN_USAGE_KEY = "lastScreenTime"
     private val LAST_APP_USAGE_KEY = "lastAppTime"
     private val mExecutor = MyExecutor.getExecutor()
-    private val mPreferences = context.getSharedPreferences(javaClass.simpleName, Context.MODE_PRIVATE)
+    private val mPreferences =
+        context.getSharedPreferences(javaClass.simpleName, Context.MODE_PRIVATE)
     private var mOnScreenSession: ScreenSession? = null
     private var mRunningAppSession: RunningAppSession? = null
 
-    private val mKeyguardManager = context.getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
+    private val mKeyguardManager =
+        context.getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
     private val mPowerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
 
     private val mAppsConstraints = ArrayList<AppConstraint>()
@@ -83,12 +85,14 @@ class RunningAppsObserver internal constructor(
             isRunning = true
         }
         mExecutor.execute {
+            // Sync usage stats on startup
+
             val screenSessionObject = mPreferences.getString(LAST_SCREEN_USAGE_KEY, null)
             if (screenSessionObject != null) {
                 val values = screenSessionObject.split(":")
-                val screenSession = ScreenSession(0, values[0].toLong(), values[1].toLong(), 1, values[2].toLong())
+                val screenSession =
+                    ScreenSession(0, values[0].toLong(), values[1].toLong(), 1, values[2].toLong())
 
-//                Crashlytics.log(Log.ERROR, "Last screen usage", "Last screen usage is: ${screenSession.usageDuration}")
                 try {
                     mSessionsProxy.addScreenSession(screenSession)
                 } catch (e: Exception) {
@@ -105,7 +109,15 @@ class RunningAppsObserver internal constructor(
                     val groupId = values[1].toLong()
                     val launchTime = values[2].toLong()
                     val session =
-                        BaseSession(0, appId, groupId, Dates.from(launchTime).beginningOfDay.time, launchTime, 1, values[3].toLong())
+                        BaseSession(
+                            0,
+                            appId,
+                            groupId,
+                            Dates.from(launchTime).beginningOfDay.time,
+                            launchTime,
+                            1,
+                            values[3].toLong()
+                        )
                     try {
                         mSessionsProxy.addSession(session)
                     } catch (e: Exception) {
@@ -120,8 +132,10 @@ class RunningAppsObserver internal constructor(
 
 
     private fun observe() {
+        // TODO This is overwhelming getting all usage stats every second for the whole day but for now we have no other fast option
+        val usageStatsSync = AppsUsageManager.getInstance(context).getUsageStatsSync()
+        usageStatsSync.syncTodayUsage()
         lastExecuteTime = System.currentTimeMillis()
-        println("Last execute time: $lastExecuteTime")
         val today = Dates.today.time
         if (mToday != today) {
             onNewDay()
@@ -129,7 +143,6 @@ class RunningAppsObserver internal constructor(
         }
         if (isDeviceInteractive() && isDeviceUnlocked()) {
             if (mOnScreenSession == null) {
-                println("On device started")
                 mOnScreenSession = ScreenSession(
                     launchDay = Dates.today.time,
                     launchTime = System.currentTimeMillis(),
@@ -144,11 +157,16 @@ class RunningAppsObserver internal constructor(
                 val sc = mOnScreenSession as ScreenSession
                 sc.usageDuration += sDelayScan
                 mPreferences.edit()
-                    .putString(LAST_SCREEN_USAGE_KEY, "${sc.launchDay}:${sc.launchTime}:${System.currentTimeMillis() - sc.launchTime}")
+                    .putString(
+                        LAST_SCREEN_USAGE_KEY,
+                        "${sc.launchDay}:${sc.launchTime}:${System.currentTimeMillis() - sc.launchTime}"
+                    )
                     .apply()
             }
 
-            val runningPackage = mRunningAppManager.getRunningApp()
+            val runningPackage =
+                null; // Disable getting running app for now we are going to use UsageStatsManager
+//            val runningPackage = mRunningAppManager.getRunningApp()
             if (runningPackage == null) {
                 if (!mRunningAppManager.isPermissionGranted())
                     notifyUsageStatsPermissionObservers()
@@ -179,14 +197,20 @@ class RunningAppsObserver internal constructor(
         rp.sessionUsage += sDelayScan
         rp.appTodayUsage += sDelayScan
         rp.groupTodayUsage += sDelayScan
-        Log.d("updateRunningSession", "updateRunningSession: ${rp.app.name} , sessionUsage: ${rp.sessionUsage}, appTodayUsage: ${rp.appTodayUsage}, groupTodayUsage: ${rp.groupTodayUsage}")
+        Log.d(
+            "updateRunningSession",
+            "updateRunningSession: ${rp.app.name} , sessionUsage: ${rp.sessionUsage}, appTodayUsage: ${rp.appTodayUsage}, groupTodayUsage: ${rp.groupTodayUsage}"
+        )
         synchronized(mAppsObservers) {
             mAppsObservers.forEach {
                 it.onNext(rp, sDelayScan)
             }
         }
         mPreferences.edit()
-            .putString(LAST_APP_USAGE_KEY, "${rp.app.id}:${rp.group.id}:${rp.launchTime}:${System.currentTimeMillis() - rp.launchTime}")
+            .putString(
+                LAST_APP_USAGE_KEY,
+                "${rp.app.id}:${rp.group.id}:${rp.launchTime}:${System.currentTimeMillis() - rp.launchTime}"
+            )
             .commit()
     }
 
@@ -226,7 +250,11 @@ class RunningAppsObserver internal constructor(
         mRunningAppSession = RunningAppSession(
             app, group, startTime,
             mSessionsProxy.getAppUsageDuration(app.id, startOfDay, System.currentTimeMillis()),
-            mSessionsProxy.getGroupUsageDuration(app.groupId, startOfDay, System.currentTimeMillis())
+            mSessionsProxy.getGroupUsageDuration(
+                app.groupId,
+                startOfDay,
+                System.currentTimeMillis()
+            )
         )
         synchronized(mAppsObservers) {
             mAppsObservers.forEach {
@@ -295,12 +323,21 @@ class RunningAppsObserver internal constructor(
             AppConstraintType.TYPE_APP_USAGE -> {
                 mAlertsManager.showAppUsageAlert(rp.app, rp.launchTime, mInstalledApps)
             }
+
             AppConstraintType.TYPE_GROUP_USAGE -> {
-                mAlertsManager.showGroupUsageAlert(rp.app, rp.launchTime, rp.group, mCreatedGroups, mInstalledApps)
+                mAlertsManager.showGroupUsageAlert(
+                    rp.app,
+                    rp.launchTime,
+                    rp.group,
+                    mCreatedGroups,
+                    mInstalledApps
+                )
             }
+
             AppConstraintType.TYPE_DEVICE_USAGE -> {
                 mAlertsManager.showDeviceUsageAlert(mSettings)
             }
+
             AppConstraintType.TYPE_GROUP_FAST_CHALLENGE -> {
                 mAlertsManager.showGroupFastChallengeAlert(
                     mChallengesManager.getInvalidChallengeOfThisSession(rp) as GroupChallenge,
@@ -311,6 +348,7 @@ class RunningAppsObserver internal constructor(
                     mCreatedChallenges
                 )
             }
+
             AppConstraintType.TYPE_GROUP_LIMIT_USAGE_CHALLENGE -> {
                 mAlertsManager.showGroupLimitChallengeAlert(
                     mChallengesManager.getInvalidChallengeOfThisSession(rp) as GroupChallenge,
@@ -321,6 +359,7 @@ class RunningAppsObserver internal constructor(
                     mCreatedChallenges
                 )
             }
+
             AppConstraintType.TYPE_APP_FAST_CHALLENGE -> {
                 mAlertsManager.showAppFastChallengeAlert(
                     mChallengesManager.getInvalidChallengeOfThisSession(rp) as AppChallenge,
@@ -329,6 +368,7 @@ class RunningAppsObserver internal constructor(
                     mCreatedChallenges
                 )
             }
+
             AppConstraintType.TYPE_APP_LIMIT_USAGE_CHALLENGE -> {
                 mAlertsManager.showAppLimitChallengeAlert(
                     mChallengesManager.getInvalidChallengeOfThisSession(rp) as AppChallenge,
@@ -337,6 +377,7 @@ class RunningAppsObserver internal constructor(
                     mCreatedChallenges
                 )
             }
+
             AppConstraintType.TYPE_DEVICE_FAST_CHALLENGE -> {
                 mAlertsManager.showDeviceFastChallenge(
                     mChallengesManager.getInvalidChallengeOfThisSession(rp) as DeviceFastChallenge,
@@ -345,6 +386,7 @@ class RunningAppsObserver internal constructor(
                     mInstalledApps.getDialPackages()[0]
                 )
             }
+
             else -> {
             }
         }
@@ -414,12 +456,7 @@ class RunningAppsObserver internal constructor(
         }
     }
 
-    private fun isDeviceInteractive(): Boolean =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT_WATCH) {
-            mPowerManager.isInteractive
-        } else {
-            mPowerManager.isScreenOn
-        }
+    private fun isDeviceInteractive(): Boolean = mPowerManager.isInteractive
 
     private fun isDeviceUnlocked(): Boolean = !mKeyguardManager.isKeyguardLocked
 
@@ -496,7 +533,10 @@ enum class AppConstraintType {
 
 interface AppConstraint {
 
-    fun isSessionValid(appSession: RunningAppSession, screenSession: ScreenSession): Pair<Boolean, AppConstraintType>
+    fun isSessionValid(
+        appSession: RunningAppSession,
+        screenSession: ScreenSession
+    ): Pair<Boolean, AppConstraintType>
 
     fun getPriority(): Int
 

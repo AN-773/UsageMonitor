@@ -55,10 +55,11 @@
             android:layout_marginBottom="20dp">
 
             <TextView
+                android:id="@+id/statistics_header"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="16dp"
-                android:text="Today's Statistics"
+                android:text="@string/statistics"
                 android:textSize="18sp"
                 android:textStyle="bold" />
 
@@ -215,10 +216,23 @@
             </LinearLayout>
 
             <!-- Main Chart -->
-            <com.github.mikephil.charting.charts.BarChart
-                android:id="@+id/main_usage_chart"
+            <FrameLayout
                 android:layout_width="match_parent"
-                android:layout_height="250dp" />
+                android:layout_height="250dp">
+
+                <com.github.mikephil.charting.charts.BarChart
+                    android:id="@+id/main_usage_chart"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent" />
+
+                <ProgressBar
+                    android:id="@+id/main_usage_loading"
+                    style="?android:attr/progressBarStyleLarge"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:visibility="gone" />
+            </FrameLayout>
 
         </LinearLayout>
 
@@ -238,17 +252,31 @@
             android:layout_marginBottom="20dp">
 
             <TextView
+                android:id="@+id/sessions_header"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="16dp"
-                android:text="Today's Sessions"
+                android:text="@string/sessions"
                 android:textSize="18sp"
                 android:textStyle="bold" />
 
-            <com.github.mikephil.charting.charts.BarChart
-                android:id="@+id/per_session_chart"
+            <FrameLayout
                 android:layout_width="match_parent"
-                android:layout_height="200dp" />
+                android:layout_height="200dp">
+
+                <com.github.mikephil.charting.charts.BarChart
+                    android:id="@+id/per_session_chart"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent" />
+
+                <ProgressBar
+                    android:id="@+id/per_session_loading"
+                    style="?android:attr/progressBarStyleLarge"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:visibility="gone" />
+            </FrameLayout>
 
         </LinearLayout>
 
