@@ -9,7 +9,7 @@ import androidx.room.PrimaryKey
     tableName = "notifications",
     indices = [
         Index(value = ["package_name"]),
-        Index(value = ["notification_key"], unique = true)
+        Index(value = ["notification_key"], unique = false)
     ]
 )
 data class NotificationData(

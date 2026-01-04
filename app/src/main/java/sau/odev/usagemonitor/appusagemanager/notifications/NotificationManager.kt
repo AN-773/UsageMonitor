@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.provider.Settings
+import android.util.Log
 import java.util.Calendar
 
 class NotificationManager(
@@ -18,7 +19,9 @@ class NotificationManager(
         // Check if notification already exists
         if (notificationsDao.notificationExists(notificationKey) > 0) {
             // Notification already recorded, skip duplicate
-            return
+            // Whats app sends multiple updates for the same notification
+            // So we will not skip duplicates
+//            return
         }
 
         val notification = NotificationData(

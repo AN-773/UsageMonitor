@@ -19,6 +19,8 @@ class AppNotificationListenerService : NotificationListenerService() {
     private val TAG = "NotificationListener"
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    private val lastCalledPerPackage = mutableMapOf<String, Long>()
+
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "NotificationListenerService created")
@@ -30,6 +32,13 @@ class AppNotificationListenerService : NotificationListenerService() {
             Log.d(TAG, "onNotificationPosted called")
 
             sbn?.let {
+                if (lastCalledPerPackage[it.packageName]?.let { lastTime ->
+                        System.currentTimeMillis() - lastTime < 100
+                    } == true) {
+                    Log.d(TAG, "Ignoring duplicate notification for package: ${it.packageName}")
+                    return
+                }
+                lastCalledPerPackage[it.packageName] = System.currentTimeMillis()
                 val packageName = it.packageName
                 val notificationKey = it.key // Unique system identifier for this notification
                 Log.d(TAG, "onNotificationPosted: Package: $packageName, Key: $notificationKey")
